@@ -5,6 +5,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -126,6 +127,7 @@ namespace Microsoft.Build.Graph
 
         private void AddEdgesFromProjectReferenceItems(Dictionary<ConfigurationMetadata, ParsedProject> allParsedProjects, GraphEdges edges)
         {
+            Debugger.Launch();
             var transitiveReferenceCache = new Dictionary<ProjectGraphNode, HashSet<ProjectGraphNode>>(allParsedProjects.Count);
 
             foreach (var parsedProject in allParsedProjects)
