@@ -10,10 +10,12 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using Microsoft.Build.BackEnd;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Eventing;
 using Microsoft.Build.Exceptions;
 using Microsoft.Build.Execution;
+using Microsoft.Build.Internal;
 using Microsoft.Build.Shared;
 
 #nullable disable
@@ -24,7 +26,7 @@ namespace Microsoft.Build.Graph
     ///     Represents a graph of evaluated projects.
     /// </summary>
     [DebuggerDisplay(@"{DebuggerDisplayString()}")]
-    public sealed class ProjectGraph
+    public sealed class ProjectGraph : ITranslatable
     {
         /// <summary>
         ///     A callback used for constructing a <see cref="ProjectInstance" /> for a specific
@@ -54,13 +56,17 @@ namespace Microsoft.Build.Graph
             Dictionary<string, string> globalProperties,
             ProjectCollection projectCollection);
 
-        private readonly Lazy<IReadOnlyCollection<ProjectGraphNode>> _projectNodesTopologicallySorted;
+        private readonly Lazy<IReadOnlyCollection<ProjectGraphNode>> _projectNodesTopologicallySortedLazy;
+        private IReadOnlyCollection<ProjectGraphNode> _projectNodesTopologicallySorted;
+        private IReadOnlyCollection<ProjectGraphNode> _projectNodes;
+        private IReadOnlyCollection<ProjectGraphNode> _graphRoots;
+        private IReadOnlyCollection<ProjectGraphNode> _entryPointNodes;
+        private GraphBuilder.GraphEdges _edges;
+        private GraphConstructionMetrics _constructionMetrics;
 
-        private GraphBuilder.GraphEdges Edges { get; }
+        internal GraphBuilder.GraphEdges TestOnly_Edges => _edges;
 
-        internal GraphBuilder.GraphEdges TestOnly_Edges => Edges;
-
-        public GraphConstructionMetrics ConstructionMetrics { get; private set; }
+        public GraphConstructionMetrics ConstructionMetrics => _constructionMetrics;
 
         /// <summary>
         /// Various metrics on graph construction.
@@ -82,20 +88,27 @@ namespace Microsoft.Build.Graph
         /// <summary>
         ///     Gets the project nodes representing the entry points.
         /// </summary>
-        public IReadOnlyCollection<ProjectGraphNode> EntryPointNodes { get; }
+        public IReadOnlyCollection<ProjectGraphNode> EntryPointNodes => _entryPointNodes;
 
         /// <summary>
         ///     Get an unordered collection of all project nodes in the graph.
         /// </summary>
-        public IReadOnlyCollection<ProjectGraphNode> ProjectNodes { get; }
+        public IReadOnlyCollection<ProjectGraphNode> ProjectNodes => _projectNodes;
 
         /// <summary>
         ///     Get a topologically sorted collection of all project nodes in the graph.
         ///     Referenced projects appear before the referencing projects.
         /// </summary>
-        public IReadOnlyCollection<ProjectGraphNode> ProjectNodesTopologicallySorted => _projectNodesTopologicallySorted.Value;
+        public IReadOnlyCollection<ProjectGraphNode> ProjectNodesTopologicallySorted
+        {
+            get
+            {
+                _projectNodesTopologicallySorted = _projectNodesTopologicallySortedLazy.Value;
+                return _projectNodesTopologicallySorted;
+            }
+        }
 
-        public IReadOnlyCollection<ProjectGraphNode> GraphRoots { get; }
+        public IReadOnlyCollection<ProjectGraphNode> GraphRoots => _graphRoots;
 
         /// <summary>
         ///     Constructs a graph starting from the given project file, evaluating with the global project collection and no
@@ -429,14 +442,14 @@ namespace Microsoft.Build.Graph
                 cancellationToken);
             graphBuilder.BuildGraph();
 
-            EntryPointNodes = graphBuilder.EntryPointNodes;
-            GraphRoots = graphBuilder.RootNodes;
-            ProjectNodes = graphBuilder.ProjectNodes;
-            Edges = graphBuilder.Edges;
+            _entryPointNodes = graphBuilder.EntryPointNodes;
+            _graphRoots = graphBuilder.RootNodes;
+            _projectNodes = graphBuilder.ProjectNodes;
+            _edges = graphBuilder.Edges;
 
-            _projectNodesTopologicallySorted = new Lazy<IReadOnlyCollection<ProjectGraphNode>>(() => TopologicalSort(GraphRoots, ProjectNodes));
+            _projectNodesTopologicallySortedLazy = new Lazy<IReadOnlyCollection<ProjectGraphNode>>(() => TopologicalSort(GraphRoots, ProjectNodes));
 
-            ConstructionMetrics = EndMeasurement();
+            _constructionMetrics = EndMeasurement();
 
             (Stopwatch Timer, string ETWArgs) BeginMeasurement()
             {
@@ -472,7 +485,72 @@ namespace Microsoft.Build.Graph
                 return new GraphConstructionMetrics(
                     measurementInfo.Timer.Elapsed,
                     ProjectNodes.Count,
-                    Edges.Count);
+                    _edges.Count);
+            }
+        }
+
+        /// <summary>
+        /// Constructor for deserialization.
+        /// </summary>
+        private ProjectGraph(ITranslator translator)
+        {
+            ((ITranslatable)this).Translate(translator);
+        }
+
+        public static byte[] WriteToStream(ProjectGraph projectGraph)
+        {
+            using var writeStream = new MemoryStream();
+            ITranslator translator = BinaryTranslator.GetWriteTranslator(writeStream);
+            translator.Translate(ref projectGraph, FactoryForDeserialization);
+            byte[] buffer = writeStream.GetBuffer();
+            ErrorUtilities.VerifyThrow(buffer != null, "Unexpected null items buffer during write translation.");
+            return buffer;
+        }
+
+        public static ProjectGraph ReadFromStream(byte[] buffer)
+        {
+            ProjectGraph translatedGraph = null;
+            ErrorUtilities.VerifyThrow(buffer != null, "Unexpected null items buffer during read translation.");
+            using MemoryStream readStream = new(buffer, 0, buffer.Length, writable: false, publiclyVisible: true);
+            using ITranslator translator = BinaryTranslator.GetReadTranslator(readStream, InterningBinaryReader.PoolingBuffer);
+            translator.Translate(ref translatedGraph, FactoryForDeserialization);
+            return translatedGraph;
+        }
+
+        /// <summary>
+        /// Factory for deserialization.
+        /// </summary>
+        internal static ProjectGraph FactoryForDeserialization(ITranslator translator)
+        {
+            return new ProjectGraph(translator);
+        }
+
+        void ITranslatable.Translate(ITranslator translator)
+        {
+            var topoSortedNodes = (List<ProjectGraphNode>)_projectNodesTopologicallySorted;
+            var entryPointNodes = (List<ProjectGraphNode>)_entryPointNodes;
+            var projectNodes = (List<ProjectGraphNode>)ProjectNodes;
+            var graphRoots = (List<ProjectGraphNode>)GraphRoots;
+            int nodeCount = _constructionMetrics.NodeCount;
+            TimeSpan constructionTime = _constructionMetrics.ConstructionTime;
+            int edgeCount = _constructionMetrics.EdgeCount;
+
+            translator.Translate(ref topoSortedNodes, ProjectGraphNode.FactoryForDeserialization);
+            translator.Translate(ref entryPointNodes, ProjectGraphNode.FactoryForDeserialization);
+            translator.Translate(ref projectNodes, ProjectGraphNode.FactoryForDeserialization);
+            translator.Translate(ref graphRoots, ProjectGraphNode.FactoryForDeserialization);
+            translator.Translate(ref _edges, GraphBuilder.GraphEdges.FactoryForDeserialization);
+            translator.Translate(ref nodeCount);
+            translator.Translate(ref constructionTime);
+            translator.Translate(ref edgeCount);
+
+            if (translator.Mode == TranslationDirection.ReadFromStream)
+            {
+                _projectNodesTopologicallySorted = topoSortedNodes;
+                _entryPointNodes = entryPointNodes;
+                _projectNodes = projectNodes;
+                _graphRoots = graphRoots;
+                _constructionMetrics = new GraphConstructionMetrics(constructionTime, nodeCount, edgeCount);
             }
         }
 
@@ -645,7 +723,7 @@ namespace Microsoft.Build.Graph
                     var expandedTargets = ExpandDefaultTargets(
                         applicableTargets,
                         referenceNode.ProjectInstance.DefaultTargets,
-                        Edges[(node, referenceNode)]);
+                        _edges[(node, referenceNode)]);
 
                     var projectReferenceEdge = new ProjectGraphBuildRequest(
                         referenceNode,

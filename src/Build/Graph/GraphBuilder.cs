@@ -634,7 +634,7 @@ namespace Microsoft.Build.Graph
             return propertyDictionary;
         }
 
-        internal sealed class GraphEdges
+        internal sealed class GraphEdges : ITranslatable
         {
             private ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance> ReferenceItems =
                 new ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance>();
@@ -698,6 +698,36 @@ namespace Microsoft.Build.Graph
                 return ReferenceItems.ToImmutableDictionary(
                     kvp => (kvp.Key.Item1.ToConfigurationMetadata(), kvp.Key.Item2.ToConfigurationMetadata()),
                     kvp => kvp.Value);
+            }
+
+            private GraphEdges(ITranslator translator)
+            {
+                Translate(translator);
+            }
+
+            private static IDictionary<(ProjectGraphNode Node, ProjectGraphNode Reference), ProjectItemInstance> CreateReferenceItemsDictionary(int capacity)
+            {
+                return new ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance>();
+            }
+
+            public void Translate(ITranslator translator)
+            {
+                IDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance> refItems = ReferenceItems;
+                translator.TranslateDictionary(
+                    ref refItems,
+                    (ITranslator t, ref (ProjectGraphNode, ProjectGraphNode) key) => t.TranslateTuple(ref key, ProjectGraphNode.FactoryForDeserialization),
+                    (ITranslator t, ref ProjectItemInstance value) => t.Translate(ref value, ProjectItemInstance.FactoryForDeserialization),
+                    CreateReferenceItemsDictionary);
+
+                if (translator.Mode == TranslationDirection.ReadFromStream)
+                {
+                    ReferenceItems = (ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance>)refItems;
+                }
+            }
+
+            internal static GraphEdges FactoryForDeserialization(ITranslator translator)
+            {
+                return new GraphEdges(translator);
             }
         }
 

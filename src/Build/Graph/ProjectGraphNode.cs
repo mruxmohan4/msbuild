@@ -16,16 +16,24 @@ namespace Microsoft.Build.Graph
     /// A node is defined by (ProjectPath, ToolsVersion, GlobalProperties).
     /// </summary>
     [DebuggerDisplay(@"{DebugString()}")]
-    public sealed class ProjectGraphNode
+    public sealed class ProjectGraphNode : ITranslatable
     {
-        private readonly HashSet<ProjectGraphNode> _projectReferences = new HashSet<ProjectGraphNode>();
-        private readonly HashSet<ProjectGraphNode> _referencingProjects = new HashSet<ProjectGraphNode>();
+        private HashSet<ProjectGraphNode> _projectReferences = new HashSet<ProjectGraphNode>();
+        private HashSet<ProjectGraphNode> _referencingProjects = new HashSet<ProjectGraphNode>();
 
         // No public creation.
         internal ProjectGraphNode(ProjectInstance projectInstance)
         {
             ErrorUtilities.VerifyThrowInternalNull(projectInstance, nameof(projectInstance));
             ProjectInstance = projectInstance;
+        }
+
+        /// <summary>
+        /// Constructor for deserialization.
+        /// </summary>
+        private ProjectGraphNode(ITranslator translator)
+        {
+            ((ITranslatable)this).Translate(translator);
         }
 
         /// <summary>
@@ -83,6 +91,32 @@ namespace Microsoft.Build.Graph
         internal ConfigurationMetadata ToConfigurationMetadata()
         {
             return new ConfigurationMetadata(ProjectInstance.FullPath, ProjectInstance.GlobalPropertiesDictionary);
+        }
+
+        /// <summary>
+        /// Create HashSet for referencing and referenced projects.
+        /// </summary>
+        private static HashSet<ProjectGraphNode> CreateHashSetForProjects(int capacity)
+        {
+            return new HashSet<ProjectGraphNode>(capacity);
+        }
+
+        void ITranslatable.Translate(ITranslator translator)
+        {
+            ProjectInstance projectInstance = ProjectInstance;
+            translator.Translate(ref projectInstance, ProjectInstance.FactoryForDeserialization);
+
+            // TODO: Write tests to ensure this does not recursively translate
+            translator.TranslateHashSet(ref _projectReferences, FactoryForDeserialization, CreateHashSetForProjects);
+            translator.TranslateHashSet(ref _referencingProjects, FactoryForDeserialization, CreateHashSetForProjects);
+        }
+
+        /// <summary>
+        /// Factory for deserialization.
+        /// </summary>
+        internal static ProjectGraphNode FactoryForDeserialization(ITranslator translator)
+        {
+            return new ProjectGraphNode(translator);
         }
     }
 }

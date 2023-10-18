@@ -39,6 +39,8 @@ namespace Microsoft.Build.Execution
         IMetadataContainer,
         IItemTypeDefinition
     {
+        private readonly bool _allowProjectTranslation = false;
+
         /// <summary>
         /// The project instance to which this item belongs.
         /// Never null.
@@ -580,6 +582,16 @@ namespace Microsoft.Build.Execution
         {
             translator.Translate(ref _itemType);
             translator.Translate(ref _taskItem, TaskItem.FactoryForDeserialization);
+
+            if (_allowProjectTranslation)
+            {
+                ProjectInstance project = _project;
+                translator.Translate(ref project, ProjectInstance.FactoryForDeserialization);
+                if (translator.Mode == TranslationDirection.ReadFromStream)
+                {
+                    _project = project;
+                }
+            }
         }
 
         #endregion
@@ -601,6 +613,12 @@ namespace Microsoft.Build.Execution
             }
         }
 
+        private ProjectItemInstance(ITranslator translator)
+        {
+            _allowProjectTranslation = true;
+            ((ITranslatable)this).Translate(translator);
+        }
+
         /// <summary>
         /// Factory for deserialization.
         /// </summary>
@@ -609,6 +627,11 @@ namespace Microsoft.Build.Execution
             ProjectItemInstance newItem = new ProjectItemInstance(projectInstance);
             ((ITranslatable)newItem).Translate(translator);
             return newItem;
+        }
+
+        internal static ProjectItemInstance FactoryForDeserialization(ITranslator translator)
+        {
+            return new ProjectItemInstance(translator);
         }
 
         /// <summary>

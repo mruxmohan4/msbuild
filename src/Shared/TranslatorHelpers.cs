@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Configuration.Assemblies;
 using System.Globalization;
 using System.Reflection;
+using static Microsoft.Build.Logging.BuildEventArgsWriter;
 using AssemblyHashAlgorithm = System.Configuration.Assemblies.AssemblyHashAlgorithm;
 
 #nullable disable
@@ -108,6 +109,34 @@ namespace Microsoft.Build.BackEnd
             where T : class, ITranslatable
         {
             translator.TranslateDictionary(ref dictionary, AdaptFactory(valueFactory), collectionCreator);
+        }
+
+        public static void TranslateTuple<T>(
+            this ITranslator translator,
+            ref (T First, T Second) tuple,
+            NodePacketValueFactory<T> valueFactory) where T : class, ITranslatable
+        {
+            if (!translator.TranslateNullable(tuple))
+            {
+                return;
+            }
+
+            if (translator.Mode == TranslationDirection.ReadFromStream)
+            {
+                T firstValue = default;
+                translator.Translate(ref firstValue, valueFactory);
+
+                T secondValue = default;
+                translator.Translate(ref secondValue, valueFactory);
+
+                tuple = (firstValue, secondValue);
+            }
+
+            if (translator.Mode == TranslationDirection.WriteToStream)
+            {
+                translator.Translate(ref tuple.First, valueFactory);
+                translator.Translate(ref tuple.Second, valueFactory);
+            }
         }
 
         public static void TranslateHashSet<T>(
