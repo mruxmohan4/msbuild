@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Configuration.Assemblies;
 using System.Globalization;
 using System.Reflection;
-using static Microsoft.Build.Logging.BuildEventArgsWriter;
 using AssemblyHashAlgorithm = System.Configuration.Assemblies.AssemblyHashAlgorithm;
 
 #nullable disable
@@ -111,12 +110,13 @@ namespace Microsoft.Build.BackEnd
             translator.TranslateDictionary(ref dictionary, AdaptFactory(valueFactory), collectionCreator);
         }
 
-        public static void TranslateTuple<T>(
+        public static void TranslateSplitTuple<T>(
             this ITranslator translator,
-            ref (T First, T Second) tuple,
+            ref T first,
+            ref T second,
             NodePacketValueFactory<T> valueFactory) where T : class, ITranslatable
         {
-            if (!translator.TranslateNullable(tuple))
+            if (!translator.TranslateNullable(first) || !translator.TranslateNullable(second))
             {
                 return;
             }
@@ -129,13 +129,14 @@ namespace Microsoft.Build.BackEnd
                 T secondValue = default;
                 translator.Translate(ref secondValue, valueFactory);
 
-                tuple = (firstValue, secondValue);
+                first = firstValue;
+                second = secondValue;
             }
 
             if (translator.Mode == TranslationDirection.WriteToStream)
             {
-                translator.Translate(ref tuple.First, valueFactory);
-                translator.Translate(ref tuple.Second, valueFactory);
+                translator.Translate(ref first, valueFactory);
+                translator.Translate(ref second, valueFactory);
             }
         }
 

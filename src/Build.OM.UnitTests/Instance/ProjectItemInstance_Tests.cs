@@ -6,13 +6,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml;
+using Microsoft.Build.BackEnd;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Definition;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Execution;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Shared;
+// using Microsoft.Build.UnitTests.BackEnd;
 using Microsoft.Build.UnitTests.Shared;
+using Microsoft.Build.Utilities;
 using Shouldly;
 using Xunit;
 using Xunit.NetCore.Extensions;
@@ -1152,6 +1155,15 @@ namespace Microsoft.Build.UnitTests.OM.Instance
 
             AssertItemHasMetadata(expectedUpdateFromTrue, items[0]);
             AssertItemHasMetadata(expectedInitial, items[1]);
+        }
+
+        [Fact]
+        public void TestTranslation()
+        {
+            ProjectItemInstance projectItemInstance = GetItemInstance();
+            ((ITranslatable)projectItemInstance).Translate(TranslationHelpers.GetWriteTranslator());
+            // ProjectItemInstance deserializedInstance = ProjectItemInstance.FactoryForDeserialization(TranslationHelpers.GetReadTranslator());
+            // Assert.Equal(projectItemInstance, deserializedInstance);
         }
 
         /// <summary>

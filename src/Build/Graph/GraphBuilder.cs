@@ -636,23 +636,26 @@ namespace Microsoft.Build.Graph
 
         internal sealed class GraphEdges : ITranslatable
         {
-            private ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance> ReferenceItems =
-                new ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance>();
+            private ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance> _referenceItems = new();
 
-            internal int Count => ReferenceItems.Count;
+            public GraphEdges()
+            {
+            }
+
+            internal int Count => _referenceItems.Count;
 
             public ProjectItemInstance this[(ProjectGraphNode node, ProjectGraphNode reference) key]
             {
                 get
                 {
-                    ErrorUtilities.VerifyThrow(ReferenceItems.TryGetValue(key, out ProjectItemInstance referenceItem), "All requested keys should exist");
+                    ErrorUtilities.VerifyThrow(_referenceItems.TryGetValue(key, out ProjectItemInstance referenceItem), "All requested keys should exist");
                     return referenceItem;
                 }
             }
 
             public void AddOrUpdateEdge((ProjectGraphNode node, ProjectGraphNode reference) key, ProjectItemInstance edge)
             {
-                ReferenceItems.AddOrUpdate(
+                _referenceItems.AddOrUpdate(
                     key,
                     addValueFactory: static ((ProjectGraphNode node, ProjectGraphNode reference) key, ProjectItemInstance referenceItem) => referenceItem,
                     updateValueFactory: static ((ProjectGraphNode node, ProjectGraphNode reference) key, ProjectItemInstance existingItem, ProjectItemInstance newItem) =>
@@ -688,14 +691,14 @@ namespace Microsoft.Build.Graph
 
             public void RemoveEdge((ProjectGraphNode node, ProjectGraphNode reference) key)
             {
-                ErrorUtilities.VerifyThrow(ReferenceItems.TryRemove(key, out _), "All requested keys should exist");
+                ErrorUtilities.VerifyThrow(_referenceItems.TryRemove(key, out _), "All requested keys should exist");
             }
 
-            internal bool HasEdge((ProjectGraphNode node, ProjectGraphNode reference) key) => ReferenceItems.ContainsKey(key);
+            internal bool HasEdge((ProjectGraphNode node, ProjectGraphNode reference) key) => _referenceItems.ContainsKey(key);
 
             internal IReadOnlyDictionary<(ConfigurationMetadata, ConfigurationMetadata), ProjectItemInstance> TestOnly_AsConfigurationMetadata()
             {
-                return ReferenceItems.ToImmutableDictionary(
+                return _referenceItems.ToImmutableDictionary(
                     kvp => (kvp.Key.Item1.ToConfigurationMetadata(), kvp.Key.Item2.ToConfigurationMetadata()),
                     kvp => kvp.Value);
             }
@@ -712,16 +715,16 @@ namespace Microsoft.Build.Graph
 
             public void Translate(ITranslator translator)
             {
-                IDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance> refItems = ReferenceItems;
+                IDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance> refItems = _referenceItems;
                 translator.TranslateDictionary(
                     ref refItems,
-                    (ITranslator t, ref (ProjectGraphNode, ProjectGraphNode) key) => t.TranslateTuple(ref key, ProjectGraphNode.FactoryForDeserialization),
+                    (ITranslator t, ref (ProjectGraphNode Node, ProjectGraphNode Reference) key) => t.TranslateSplitTuple(ref key.Node, ref key.Reference, ProjectGraphNode.FactoryForDeserialization),
                     (ITranslator t, ref ProjectItemInstance value) => t.Translate(ref value, ProjectItemInstance.FactoryForDeserialization),
                     CreateReferenceItemsDictionary);
 
                 if (translator.Mode == TranslationDirection.ReadFromStream)
                 {
-                    ReferenceItems = (ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance>)refItems;
+                    _referenceItems = (ConcurrentDictionary<(ProjectGraphNode, ProjectGraphNode), ProjectItemInstance>)refItems;
                 }
             }
 
