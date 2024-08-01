@@ -48,6 +48,7 @@ namespace Microsoft.Build.Shared
             {
                 try
                 {
+                    ResetInstance_ForUnitTestsOnly(); // TODO: Remove
                     return BuildEnvironmentHelperSingleton.s_instance;
                 }
                 catch (TypeInitializationException e)
